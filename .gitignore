@@ -1,0 +1,5 @@
+# Python virtual environment created when following trilobot_simulator/README.md
+trilobot_simulator/venv/
+venv/
+__pycache__/
+*.pyc
