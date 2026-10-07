@@ -38,11 +38,10 @@ AGR9027/
     soon.* Will contain sample scripts covering machine learning basics, for a
     dedicated taught session.
 
-* **[trilobot_simulator/](trilobot_simulator)** - Three simple simulators (one each
-  for Tasks A, B and C) that let you develop and test your Assessment 2 logic on your
-  own laptop, without needing the real robot or access to the University lab. See its
-  own [README](trilobot_simulator/README.md) for setup instructions (including a
-  Python virtual environment) and usage.
+* **[trilobot_simulator/](trilobot_simulator)** - Simulators for Tasks A, B and C,
+  plus a webcam vision harness, to let you develop and test your Assessment 2 logic
+  on your own laptop without needing the real robot or access to the University lab.
+  See its own [README](trilobot_simulator/README.md) for setup and usage.
 
 ## Assessment 2 overview
 

@@ -1,41 +1,33 @@
-# =====================================================================================
-# AGR9027 - Task A simulator: Obstacle avoidance (point A -> point B)
-# =====================================================================================
-# This file lets you test your Task A code on your own laptop, without the real
-# Trilobot. It creates a fake robot object called "tbot" that behaves (as closely as
-# possible) like the real `Trilobot` object you get from `from trilobot import Trilobot`.
+# =============================================================================
+# AGR9027 - Task A Simulator: Obstacle Avoidance
+# =============================================================================
+# PURPOSE
+# Test obstacle avoidance from point A to point B without the physical Trilobot.
 #
-# The fake robot supports the same methods used in the example scripts in /scripts:
-#   tbot.forward(speed), tbot.backward(speed), tbot.turn_left(speed), tbot.turn_right(speed)
-#   tbot.curve_forward_left(speed), tbot.curve_forward_right(speed)
-#   tbot.curve_backward_left(speed), tbot.curve_backward_right(speed)
-#   tbot.set_motor_speeds(left, right)
-#   tbot.coast(), tbot.stop(), tbot.disable_motors()
-#   tbot.read_distance(timeout=.., samples=..)   -> distance in cm (ultrasound sensor)
-#   tbot.fill_underlighting(color)
-#   tbot.read_button(BUTTON_A)                   -> True once you press "q" or close the window
+# SCENARIO
+# The simulator generates 1, 3, 5 or 8 obstacles at complexity levels 1-4.
+# The 2D map shows the robot, obstacle positions, sensor fields of view and
+# underlighting. A simulated BGR camera feed is shown below the map.
 #
-# It also provides tbot.get_camera_image() which returns a numpy BGR image (like the
-# real `picamera` capture used in the scripts), showing the obstacles as red blobs in
-# front of the robot. You can feed this into the same OpenCV code used in
-# scripts/trilobot/color_detection.py or scripts/trilobot/ball_tracking.py.
+# STUDENT INTERFACE
+# The simulator calls robot_control(tbot) from student_control.py repeatedly.
+# The fake tbot provides movement, distance-sensor, underlighting and camera
+# methods. The student_control.py webcam function processes a BGR image and
+# returns a debug image and a short summary.
 #
-# HOW TO USE THIS FILE
-# ---------------------
-# 1. Install the requirements (see trilobot_simulator/requirements.txt):
-#       pip install -r ../requirements.txt
-# 2. Run this file directly:
-#       python simulator_task_a.py
-# 3. Scroll down to the function `robot_control(tbot)`. That is the ONLY part of this
-#    file you need to edit. It already contains a very simple working example (drive
-#    forward, turn away when something is too close). Replace/extend it with your own
-#    Task A algorithm.
-# 4. A pygame window will open showing a top-down view of the arena: point A (green),
-#    point B (blue), the robot (yellow triangle) and the obstacles (red circles).
+# HOW TO RUN
+# From this folder, run: python simulator_task_a.py
+# Edit student_control.py for your robot and camera logic. Keep this simulator
+# file unchanged.
 #
-# NOTE: This is a simplified 2D simulation to help you develop and debug your decision
-# -making logic. You must still test and validate your final solution on the real robot.
-# =====================================================================================
+# CONTROLS
+# n: new scene at the current level; 1-4: select a level and regenerate;
+# d: advance a level and regenerate; q / ESC: quit.
+#
+# LIMITATIONS
+# This simplified 2D simulation is for development only. Validate the final
+# solution on the physical robot.
+# =============================================================================
 
 import math
 import random
@@ -45,20 +37,25 @@ import cv2
 import numpy as np
 import pygame
 
+from student_control import robot_control
+
 # --------------------------------------------------------------------------- settings
 SCALE = 100          # pixels per metre, used only for drawing the window
 ARENA_W_M = 6.0      # arena width in metres (point A on the left, point B on the right)
 ARENA_H_M = 4.0      # arena height in metres
-NUM_OBSTACLES = 5    # try increasing this for a harder scenario
+COMPLEXITY_LEVEL = 1  # 1 (easiest) to 4 (hardest); controls the number of obstacles
+OBSTACLES_BY_LEVEL = {1: 1, 2: 3, 3: 5, 4: 8}
 GOAL_RADIUS_M = 0.5  # Task A counts as successful inside this radius of point B
 ROBOT_RADIUS_M = 0.12
 OBSTACLE_RADIUS_RANGE_M = (0.12, 0.28)
+CAMERA_MAX_RANGE_M = 6.0
 MAX_SPEED_MPS = 0.35        # approximate top speed of the real Trilobot
 WHEEL_BASE_M = 0.16
 SENSOR_MAX_RANGE_CM = 300.0
 SENSOR_FOV_DEG = 10         # the real ultrasound sensor is a narrow forward-facing cone
 CAMERA_FOV_DEG = 70
 CAMERA_SIZE = (320, 240)    # (width, height), same resolution used in the example scripts
+CAMERA_FOCAL_LENGTH_PX = CAMERA_SIZE[0] / (2 * math.tan(math.radians(CAMERA_FOV_DEG / 2)))
 FPS = 30
 
 # Underlighting colour presets, matching the names used in trilobot/scripts
@@ -84,10 +81,11 @@ def make_world():
     point_b = (ARENA_W_M - 0.4, ARENA_H_M / 2)
     obstacles = []
     attempts = 0
-    while len(obstacles) < NUM_OBSTACLES and attempts < 500:
+    target_count = OBSTACLES_BY_LEVEL[COMPLEXITY_LEVEL]
+    while len(obstacles) < target_count and attempts < 2000:
         attempts += 1
         x = random.uniform(1.2, ARENA_W_M - 1.2)
-        y = random.uniform(0.4, ARENA_H_M - 0.4)
+        y = max(0.4, min(ARENA_H_M - 0.4, random.gauss(ARENA_H_M / 2, 0.65)))
         r = random.uniform(*OBSTACLE_RADIUS_RANGE_M)
         # keep obstacles away from the start/goal points so the task is always solvable
         if math.hypot(x - point_a[0], y - point_a[1]) < 0.9:
@@ -207,21 +205,22 @@ class SimTrilobot:
             dist = math.hypot(dx, dy)
             angle = math.atan2(dy, dx) - self.theta
             angle = math.atan2(math.sin(angle), math.cos(angle))
-            if dist < 0.05 or abs(angle) > half_fov:
+            if dist < 0.05 or dist > CAMERA_MAX_RANGE_M or abs(angle) > half_fov:
                 continue
             visible.append((dist, angle, obstacle))
         # draw far obstacles first so near ones are painted on top
         for dist, angle, obstacle in sorted(visible, key=lambda t: -t[0]):
             u = int(w / 2 + (angle / half_fov) * (w / 2))
-            apparent_radius = int(max(4, min(w / 3, (obstacle.radius * 60) / max(dist, 0.1))))
-            v = int(h / 2 + min(h / 3, dist * 10))
+            apparent_radius = max(1, int(CAMERA_FOCAL_LENGTH_PX * obstacle.radius / dist))
+            v = int(h * 0.65)
             cv2.circle(image, (u, v), apparent_radius, (0, 0, 255), -1)  # BGR red
         return image
 
     # -- physics update, called once per simulation frame -----------------------
     def _update(self, dt):
         v = (self.left_speed + self.right_speed) / 2.0 * MAX_SPEED_MPS
-        w = (self.right_speed - self.left_speed) / WHEEL_BASE_M * MAX_SPEED_MPS
+        # Screen y increases downward, so positive angular velocity is a right turn.
+        w = (self.left_speed - self.right_speed) / WHEEL_BASE_M * MAX_SPEED_MPS
         self.theta += w * dt
         new_x = self.x + v * math.cos(self.theta) * dt
         new_y = self.y + v * math.sin(self.theta) * dt
@@ -233,40 +232,43 @@ class SimTrilobot:
                 self.collided = True
 
 
-# =====================================================================================
-#  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  EDIT FROM HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# =====================================================================================
-# This function is called about 30 times per second. Use `tbot` exactly like you would
-# use the real Trilobot object. The example below is a very simple obstacle avoidance
-# behaviour: drive forward, and if something is detected too close in front, turn until
-# the way ahead is clear again. Replace this with your own Task A algorithm (you could
-# also use tbot.get_camera_image() with OpenCV, like in scripts/trilobot/color_detection.py).
-AVOID_DISTANCE_CM = 35  # start turning when an obstacle is closer than this
-
-
-def robot_control(tbot):
-    distance = tbot.read_distance()
-
-    if distance < AVOID_DISTANCE_CM:
-        tbot.fill_underlighting(RED)
-        tbot.turn_right(0.6)
-    else:
-        tbot.fill_underlighting(GREEN)
-        tbot.forward(0.6)
-
-
-# =====================================================================================
-#  >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  EDIT UNTIL HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-# =====================================================================================
-
-
 # --------------------------------------------------------------------------- rendering
 def to_px(pos):
     return int(pos[0] * SCALE), int(pos[1] * SCALE)
 
 
+def draw_sensor_fovs(screen, tbot):
+    origin = to_px((tbot.x, tbot.y))
+    overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+    for fov, distance, colour in (
+        (CAMERA_FOV_DEG, CAMERA_MAX_RANGE_M, (40, 120, 255, 48)),
+        (SENSOR_FOV_DEG, SENSOR_MAX_RANGE_CM / 100, (255, 210, 40, 90)),
+    ):
+        half_angle = math.radians(fov / 2)
+        points = [origin]
+        for index in range(25):
+            angle = tbot.theta - half_angle + 2 * half_angle * index / 24
+            points.append(to_px((
+                tbot.x + math.cos(angle) * distance,
+                tbot.y + math.sin(angle) * distance,
+            )))
+        pygame.draw.polygon(overlay, colour, points)
+    screen.blit(overlay, (0, 0))
+
+
+def draw_camera_feed(screen, font, image):
+    panel_y = int(ARENA_H_M * SCALE) + 28
+    pygame.draw.rect(screen, (18, 18, 18), (0, panel_y - 24, screen.get_width(), CAMERA_SIZE[1] + 48))
+    screen.blit(font.render("Simulated camera (BGR image shown as colour)", True, (230, 230, 230)),
+                (10, panel_y - 21))
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    camera_surface = pygame.surfarray.make_surface(np.transpose(rgb_image, (1, 0, 2)))
+    screen.blit(camera_surface, (10, panel_y))
+
+
 def draw_world(screen, font, tbot, point_a, point_b, elapsed, finished, result_text):
     screen.fill((30, 30, 30))
+    draw_sensor_fovs(screen, tbot)
 
     pygame.draw.circle(screen, (0, 180, 0), to_px(point_a), int(GOAL_RADIUS_M * SCALE), 2)
     pygame.draw.circle(screen, (0, 180, 0), to_px(point_a), 6)
@@ -285,12 +287,15 @@ def draw_world(screen, font, tbot, point_a, point_b, elapsed, finished, result_t
     tip = (rx + r_px * math.cos(tbot.theta), ry + r_px * math.sin(tbot.theta))
     left = (rx + r_px * math.cos(tbot.theta + 2.5), ry + r_px * math.sin(tbot.theta + 2.5))
     right = (rx + r_px * math.cos(tbot.theta - 2.5), ry + r_px * math.sin(tbot.theta - 2.5))
-    pygame.draw.polygon(screen, tbot.underlight_colour if tbot.underlight_colour != BLACK else (255, 255, 0),
-                         [tip, left, right])
+    led_colour = tbot.underlight_colour if tbot.underlight_colour != BLACK else (255, 255, 0)
+    pygame.draw.polygon(screen, led_colour, [tip, left, right])
+    pygame.draw.circle(screen, led_colour, (rx, ry), max(3, r_px // 4))
 
     hud_lines = [
         f"Elapsed: {elapsed:4.1f}s   Distance sensor: {tbot.read_distance():5.1f} cm",
-        "Edit robot_control(tbot) in simulator_task_a.py. Press Q to quit.",
+        f"Complexity: {COMPLEXITY_LEVEL}/4 ({OBSTACLES_BY_LEVEL[COMPLEXITY_LEVEL]} obstacles)",
+        "FOV: camera blue, ultrasonic distance gold | n: new scene, 1-4: level, d: next",
+        "Edit robot_control(tbot) in student_control.py. Press Q / ESC to quit.",
     ]
     if finished:
         hud_lines.append(result_text)
@@ -299,12 +304,17 @@ def draw_world(screen, font, tbot, point_a, point_b, elapsed, finished, result_t
 
 
 def main():
+    global COMPLEXITY_LEVEL
     random.seed()
     point_a, point_b, obstacles = make_world()
     tbot = SimTrilobot(point_a, obstacles)
 
     pygame.init()
-    screen = pygame.display.set_mode((int(ARENA_W_M * SCALE), int(ARENA_H_M * SCALE)))
+    map_height = int(ARENA_H_M * SCALE)
+    screen = pygame.display.set_mode((
+        int(ARENA_W_M * SCALE),
+        map_height + CAMERA_SIZE[1] + 56,
+    ))
     pygame.display.set_caption("AGR9027 - Task A simulator: obstacle avoidance")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont("consolas", 16)
@@ -322,6 +332,24 @@ def main():
             if event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE):
                 tbot.quit_requested = True
                 running = False
+            if event.type == pygame.KEYDOWN and event.key not in (pygame.K_q, pygame.K_ESCAPE):
+                new_level = COMPLEXITY_LEVEL
+                regenerate = False
+                if pygame.K_1 <= event.key <= pygame.K_4:
+                    new_level = event.key - pygame.K_0
+                    regenerate = True
+                elif event.key == pygame.K_d:
+                    new_level = min(4, COMPLEXITY_LEVEL + 1)
+                    regenerate = True
+                elif event.key == pygame.K_n:
+                    regenerate = True
+                if regenerate:
+                    COMPLEXITY_LEVEL = new_level
+                    point_a, point_b, obstacles = make_world()
+                    tbot = SimTrilobot(point_a, obstacles)
+                    finished = False
+                    result_text = ""
+                    start_ticks = pygame.time.get_ticks()
 
         if not finished:
             robot_control(tbot)
@@ -336,6 +364,7 @@ def main():
 
         elapsed = (pygame.time.get_ticks() - start_ticks) / 1000.0
         draw_world(screen, font, tbot, point_a, point_b, elapsed, finished, result_text)
+        draw_camera_feed(screen, font, tbot.get_camera_image())
         pygame.display.flip()
 
         if finished and result_text:

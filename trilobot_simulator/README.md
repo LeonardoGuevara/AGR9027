@@ -2,7 +2,8 @@
 
 These simulators let you develop and test your Assessment 2 code **on your own
 laptop**, without needing the real Trilobot or access to the University lab. There is
-**one simulator per task** (A, B, C) because each task needs a different test scenario.
+**one simulator per task** (A, B, C) because each task needs a different test scenario,
+plus a live-webcam vision harness.
 You don't need any robotics/Raspberry Pi hardware or the `trilobot`/`picamera` Python
 packages to run these - only a normal laptop with Python installed.
 
@@ -12,6 +13,58 @@ packages to run these - only a normal laptop with Python installed.
 > real Trilobot - the brief requires your final report and live demonstration to use
 > the real robot.
 
+## Simulator overview
+
+Each simulator provides a different practice scenario. For all tasks, edit the
+task's `student_control.py`; leave `simulator_task_*.py` unchanged. The official
+assessment brief remains the authority for exact requirements and marking criteria.
+
+* **Task A - obstacle avoidance**
+  * **Objective:** Navigate from known point A to point B without colliding with
+    obstacles.
+  * **Scenario and display:** A 2D arena shows A, B, obstacles, the robot, transparent
+    camera and ultrasound fields of view, underlighting, live distance reading and a
+    320x240 synthetic BGR camera image. Obstacles are preferentially placed near the
+    A-to-B route; their apparent camera size is projected from their configured
+    radius and varies with distance. The camera range is 6 m.
+  * **Student inputs:** `robot_control(tbot)` can read ultrasound distance with
+    `tbot.read_distance()` and camera images with `tbot.get_camera_image()`. Students
+    can process images for obstacle detections and use those results with distance
+    readings to decide how to move. Reaching B requires more than reactive avoidance:
+    students must estimate position and heading while travelling around obstacles.
+    The Trilobot library and simulator do not provide odometry, so students need to
+    implement an approximate motion estimate themselves.
+
+* **Task B - person following**
+  * **Objective:** Follow the designated person while distinguishing them from decoys
+    and maintaining the required following distance (0.5 m).
+  * **Scenario and display:** A 2D arena shows the robot, a target and decoys, camera
+    and ultrasound fields of view, underlighting, live distance reading and a
+    320x240 synthetic BGR camera image. People are rendered as simple human
+    silhouettes with grey skin and colour-coded clothing; their apparent size is
+    projected from their configured dimensions and varies with distance. The camera
+    range is 6 m.
+  * **Student inputs:** `robot_control(tbot, target_color)` can read ultrasound
+    distance with `tbot.read_distance()` and camera images with
+    `tbot.get_camera_image()`. Students can process images to detect and locate the
+    target person, then use those results with distance readings to steer toward the
+    correct person and manage following distance. A single-frame detection may
+    confuse a decoy for the target; maintain a target track across successive frames
+    and use motion/position continuity to help preserve the target's identity.
+
+* **Task C - strawberry counting**
+  * **Objective:** Identify and count the ripe strawberries visible in the image,
+    excluding unripe and semi-ripe fruit as required by the assessment.
+  * **Scenario and display:** The simulator generates synthetic strawberries with
+    varied shapes, colours and ripeness, including overlapping fruit. The result
+    window shows the student's detections, count and error; a second window shows the
+    same scene with ground-truth ripe fruit marked.
+  * **Student inputs:** `count_ripe_strawberries(image)` receives a synthetic BGR
+    camera image and returns a count with a debug image. Students should use image
+    processing to identify ripe fruit and distinguish/count individual berries,
+    including when fruits overlap. There is no ultrasound distance input for this
+    task.
+
 See the [main README](../README.md) for an overview of the whole repository.
 
 ## Folder structure
@@ -20,26 +73,28 @@ See the [main README](../README.md) for an overview of the whole repository.
 trilobot_simulator/
   requirements.txt                   <- Python packages needed (see setup below)
   task_a_obstacle_avoidance/
-    simulator_task_a.py              <- run this: point A -> point B, avoid obstacles
+    simulator_task_a.py              <- protected simulator: point A -> point B
+    student_control.py               <- edit this: Task A robot and vision logic
   task_b_person_following/
-    simulator_task_b.py              <- run this: follow the target "person"
+    simulator_task_b.py              <- protected simulator: follow the target person
+    student_control.py               <- edit this: Task B robot and vision logic
   task_c_strawberry_counting/
-    simulator_task_c.py              <- run this: count ripe strawberries in a photo
+    simulator_task_c.py              <- protected simulator and scene generator
+    student_control.py               <- edit this: Task C counting logic
+  webcam_camera.py                   <- run student vision code on a laptop webcam
 ```
 
-Each `simulator_task_*.py` file is self-contained (just run it). Inside every file you
-will find a clearly marked section:
+The `simulator_task_*.py` files contain the simulation code and call the corresponding
+`student_control.py`. Students should make changes in `student_control.py`, not in the
+simulator:
 
 ```python
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  EDIT FROM HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-def robot_control(tbot):
-    ...
-# >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>  EDIT UNTIL HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+# Task A/B: robot_control(tbot) or robot_control(tbot, target_color)
+# Task C:   count_ripe_strawberries(image)
 ```
 
-That is the **only** part of each file you need to change. Everything above/below it
-is the simulator itself (the fake robot, the fake world, the pygame/OpenCV window) -
-you don't need to understand or modify it, although you are welcome to look at it.
+The simulator files can therefore be rerun or updated without overwriting student
+logic. The same student vision functions can also be exercised with the webcam harness.
 
 ## Setup (do this once)
 
@@ -113,8 +168,49 @@ python simulator_task_a.py
 ```
 
 (similarly for `task_b_person_following` and `task_c_strawberry_counting`). A window
-will open showing the simulated world. Press `Q` (or close the window) to quit a
-pygame simulator; for Task C, press `n`/`d`/`q` as shown in the on-screen instructions.
+will show the simulated map and camera view. For Tasks A and B, press `n` for a new
+scene at the current level, `1`-`4` to select a level and regenerate, or `d` to advance
+to the next level and regenerate. Press `Q`/`ESC` (or close the window) to quit. Task C
+uses the same `n`, `1`-`4`, `d`, and `q`/`ESC` controls.
+
+### Complexity levels
+
+Set `COMPLEXITY_LEVEL = 1`, `2`, `3` or `4` near the top of each Task A/B simulator,
+or press the matching number while it is running. Press `d` to advance to the next
+level and regenerate the scene.
+Task C starts at level 1 and lets you select levels with `1`-`4` while it is running.
+
+* **Task A:** the levels generate 1, 3, 5 and 8 obstacles, respectively. Obstacles are
+  sampled around the line from A to B, while keeping the start and goal areas clear.
+* **Task B:** levels generate 0, 1, 3 and 5 extra people. All people start at the same
+  distance from the robot and within the camera field of view; the target then walks
+  away at a constant angle randomly selected from -20° to +20° for each scene, so it
+  may walk straight ahead.
+  Similar-colour decoys use different shades of the target colour.
+  The hardest level includes at least two similar-colour decoys; level 3 includes one.
+* **Task C:** the levels have 8, 12, 16 and 20 ripe berries to count, respectively.
+  Total unripe and semi-ripe berries increase from 4 to 8, 14 and 20; semi-ripe
+  counts are 0, 2, 6 and 12, and their yellow/red coloring varies. Overlap clusters
+  contain no more than two berries and use matching ripeness classes, prioritizing
+  ripe-with-ripe pairs. At level 4 every berry overlaps in a pair. The simulator
+  displays the student's result and a ground-truth view with circles around ripe fruit
+  in side-by-side windows.
+
+### Live webcam vision
+
+From the `trilobot_simulator` folder, run one of:
+
+```powershell
+python webcam_camera.py --task a
+python webcam_camera.py --task b --target-colour RED
+python webcam_camera.py --task c
+```
+
+The harness opens the laptop's default camera (use `--camera 1` to select another
+device), calls the selected task's `process_camera_frame` in `student_control.py`, and
+shows its output live. For Task B, choose `RED`, `YELLOW`, `GREEN` or `BLUE` with
+`--target-colour`. This is a vision-only tool: it does not connect webcam frames to
+the simulated robot's map or distance sensor. Press `Q` or `ESC` to close it.
 
 ## How the fake robot ("tbot") relates to the real Trilobot
 
@@ -134,38 +230,13 @@ This means the control logic you write and test in the simulator (the code insid
   `scripts/trilobot/color_detection.py` for the `picamera` capture pattern).
 * Remove the pygame window code (only needed for the simulator's visualisation).
 
-## What each simulator covers
-
-* **Task A - obstacle avoidance** (`task_a_obstacle_avoidance/simulator_task_a.py`):
-  a 2D arena with point A, point B and red obstacles of random size placed between
-  them. You get a simulated ultrasound sensor (`tbot.read_distance()`) and a simulated
-  forward camera view with the obstacles as red blobs. Increase `NUM_OBSTACLES` at the
-  top of the file for a harder scenario. The simulator reports success (reached B
-  within 0.5 m without collisions) or failure (collision) in the window and console.
-
-* **Task B - person following** (`task_b_person_following/simulator_task_b.py`):
-  a target "person" (coloured square) wanders around the arena along with some decoy
-  people. The target's colour is printed in the console at start-up. Your code must
-  keep the robot about 0.5 m from the target using the simulated camera (colour
-  detection) and ultrasound sensor. Set `NUM_DECOYS` and `SIMILAR_DECOY_COLOURS = True`
-  at the top of the file to try the harder levels described in the assessment brief.
-
-* **Task C - strawberry counting**
-  (`task_c_strawberry_counting/simulator_task_c.py`): generates a synthetic photo of a
-  strawberry patch (red = ripe, green = unripe, with some overlap/occlusion) and lets
-  you test a counting algorithm against it, showing the live count and the estimation
-  error compared to the known ground truth. Press `d` to make the scene harder (more
-  fruit, more overlap) to test the robustness of your algorithm, matching the
-  "different levels of complexity" mentioned in the brief. Once your module leader adds
-  real strawberry photos to [sample_images/](../sample_images), you can test your code
-  directly on those (load with `cv2.imread(...)`) alongside the synthetic scenes.
-
 ## Limitations to keep in mind
 
-* The simulators use simplified 2D physics/kinematics and synthetic "camera" images
-  (flat-coloured shapes) rather than real pictures - real lighting, camera distortion,
-  and background clutter will make the real robot more challenging.
-* Task A/B camera images only contain the coloured shapes needed for detection; they
-  do not look like real photographs.
+* The simulators use simplified 2D physics/kinematics and synthetic camera images.
+  Task A obstacles are red circular blobs sized by apparent distance; Task B uses
+  simple grey-skin, coloured-clothing silhouettes. They are not photographs.
+* The webcam harness can process real objects, printed pictures or fruit, but it has no
+  simulated distance measurement and does not move the simulator robot. Real lighting,
+  camera distortion and background clutter will still affect detections.
 * Collisions, sensor readings and the "success" conditions are approximations of the
   real robot's capabilities, used only to help you iterate quickly.
